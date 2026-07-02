@@ -1,0 +1,10 @@
+*.o
+*.out
+*.exe
+kvstore
+data/*.log
+data/*.snapshot
+*.swp
+*.swo
+.cache/
+compile_commands.json
