@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
 
 static const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
 static const uint64_t FNV_PRIME = 1099511628211ULL;
@@ -59,10 +60,10 @@ void ht_destroy(HashTable *ht){
     free(ht);
 }
 
-bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len){
+bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len, int ttl_seconds){
 
     if(ht==NULL || key == NULL || value == NULL) return false;
-
+    
     uint64_t hash = hash_key(key);
     size_t bucket_index = hash % ht->bucket_count;
 
@@ -81,6 +82,9 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len)
     free(curr->value);
     curr->value = new_value;
     curr->value_len = value_len;
+
+    time_t current_time = time(NULL);
+    curr->expires_at = current_time + ttl_seconds;
     return true;
     }
     
@@ -109,7 +113,10 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len)
     memcpy(new_entry->value, value, value_len+1);
 
     new_entry->value_len = value_len;
-    new_entry->expires_at = 0;
+
+    time_t current_time = time(NULL);
+    new_entry->expires_at = current_time + ttl_seconds;
+
     new_entry->next = NULL;
 
     if(prev==NULL){
@@ -129,7 +136,7 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len)
     return true;
 }
 
-const char* ht_get(const HashTable *ht, const char *key){
+const char* ht_get(HashTable *ht, const char *key){
 
     if(ht==NULL || key==NULL) return NULL;
 
@@ -137,20 +144,53 @@ const char* ht_get(const HashTable *ht, const char *key){
     size_t bucket_index = hash % ht->bucket_count;
 
     Entry *curr = ht->buckets[bucket_index];
-
+    Entry *prev = NULL;
+    time_t current_time = time(NULL);
+    
     while(curr){
+        
+
+        if(curr->expires_at <= current_time){
+
+              if(prev==NULL){
+
+                  ht->buckets[bucket_index] = curr->next;
+                  free(curr->key);
+                  free(curr->value);
+                  free(curr);
+                  curr=ht->buckets[bucket_index];
+                  continue;
+
+              }
+              else{
+
+                Entry *next = curr->next;
+                prev->next = next;
+                free(curr->key);
+                free(curr->value);
+                free(curr);
+                curr=next;
+                continue;
+
+              }
+        }
+
+
         if(strcmp(curr->key, key)==0){
 
             return curr->value;
 
         }
+
+        prev = curr;
         curr=curr->next;
+
      }
     
     return NULL; 
 }
 
-bool ht_exists(const HashTable *ht, const char *key){
+bool ht_exists(HashTable *ht, const char *key){
 
     const char* answer = ht_get(ht, key);
     return answer != NULL;
@@ -220,6 +260,8 @@ static bool ht_resize(HashTable *ht){
     ht->bucket_count = new_bucket_count;
     return true;
 }
+
+
 
 
 
