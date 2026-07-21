@@ -261,6 +261,57 @@ static bool ht_resize(HashTable *ht){
     return true;
 }
 
+size_t ht_cleanup_expired(HashTable *ht){
+
+            if(ht==NULL) return 0;
+
+            size_t removed =0;
+            time_t current_time = time(NULL);
+
+            for(size_t i=0; i < ht->bucket_count; i++){
+                
+                Entry *curr = ht->buckets[i];
+                Entry *prev = NULL;
+
+
+                while(curr){
+
+                    if(curr->expires_at <= current_time){
+
+                    if(prev==NULL){
+                         
+                        ht->buckets[i] = curr->next;
+                        free(curr->value);
+                        free(curr->key);
+                        free(curr);
+                        curr = ht->buckets[i];
+                        removed++;
+                        continue;
+
+                    } else{
+
+                        Entry *next = curr->next;
+                        prev->next = next;
+                        free(curr->value);
+                        free(curr->key);
+                        free(curr);
+                        curr=next;
+                        removed++;
+                        continue;
+
+                    }
+                    }
+
+                    prev = curr;
+                    curr = curr->next;
+                } 
+            }
+
+            return removed;
+}
+
+
+
 
 
 
