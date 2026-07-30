@@ -3,6 +3,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <limits.h>
+
+#define KVDB_VERSION 1
+#define KVDB_MAGIC "KVDB"
 
 static const uint64_t FNV_OFFSET_BASIS = 14695981039346656037ULL;
 static const uint64_t FNV_PRIME = 1099511628211ULL;
@@ -311,7 +315,184 @@ size_t ht_cleanup_expired(HashTable *ht){
 }
 
 
+bool ht_save(HashTable *ht, const char *filename){
 
+    char temp_filename[PATH_MAX];
+
+    snprintf(temp_filename, sizeof(temp_filename), "%s.temp", filename);
+
+
+    FILE *fp = fopen(temp_filename , "wb");
+
+    if(fp == NULL) return false;
+
+    static const char magic[] = KVDB_MAGIC;
+    if(fwrite(magic, 1, sizeof(magic)-1, fp) != sizeof(magic)-1) 
+        goto cleanup;
+
+    uint32_t version = KVDB_VERSION;
+    if(fwrite(&version, sizeof(version), 1, fp) != 1)
+        goto cleanup;
+
+    uint64_t entry_count = ht->size;
+    if(fwrite(&entry_count, sizeof(entry_count), 1, fp) != 1)
+        goto cleanup;
+
+
+    for(size_t i=0; i<ht->bucket_count; i++){
+
+        Entry *curr = ht->buckets[i];
+
+        while(curr){
+
+            uint64_t key_length = strlen(curr->key);
+            uint64_t value_length = curr->value_len;
+            uint64_t expired_time = curr->expires_at;
+
+            if(fwrite(&key_length, sizeof(key_length), 1, fp) != 1)
+                    goto cleanup;
+
+            if(fwrite(&value_length, sizeof(value_length), 1, fp) != 1)
+                goto cleanup;
+
+            if(fwrite(&expired_time, sizeof(expired_time), 1, fp) != 1)
+                goto cleanup;
+
+            if(fwrite(curr->key, 1, key_length, fp) != key_length)
+                goto cleanup;
+
+            if(fwrite(curr->value, 1, value_length, fp) != value_length)
+                goto cleanup;
+
+            curr=curr->next;
+        }
+    }
+    
+    if(fflush(fp) != 0) goto cleanup;
+
+    if(fsync(fileno(fp)) != 0) goto cleanup;
+
+    bool check_close = (fclose(fp) == 0);
+    fp=NULL;
+    if(!check_close) goto cleanup;
+
+    if(rename(temp_filename, filename) != 0) goto cleanup;
+    return true;
+
+cleanup :
+    if(fp!=NULL) fclose(fp);
+
+    remove(temp_filename);
+    return false;
+}
+
+bool ht_load(HashTable *ht, const char* filename){
+
+    FILE *fp = fopen(filename , "rb");
+
+    if(fp==NULL) return false;
+
+    char magic[sizeof(KVDB_MAGIC)];
+
+    if(fread(magic, sizeof(magic)-1, 1, fp) != 1){
+        goto cleanup;
+    }
+
+    if(memcmp(magic, KVDB_MAGIC, sizeof(KVDB_MAGIC)-1) != 0){
+        goto cleanup;
+    }
+
+    uint32_t version;
+
+    if(fread(&version, sizeof(version), 1, fp) != 1){
+        goto cleanup;
+    }
+
+    if(version != KVDB_VERSION){
+        goto cleanup;
+    }
+
+    uint64_t entry_count;
+
+    if(fread(&entry_count, sizeof(entry_count), 1, fp) != 1){
+        goto cleanup;
+    }
+
+    time_t current_time = time(NULL);
+    char* key = NULL;
+    char* value = NULL;
+
+    for(uint64_t i=0; i < entry_count; i++){
+
+        uint64_t key_length;
+        uint64_t value_length;
+        time_t expires_at;
+
+        if(fread(&key_length, sizeof(key_length), 1, fp) != 1){
+            goto cleanup;
+        }
+
+         if(fread(&value_length, sizeof(value_length), 1, fp) != 1){
+             goto cleanup;
+
+        }
+    
+        if(fread(&expires_at, sizeof(expires_at), 1, fp) != 1){
+            goto cleanup;
+        }
+
+         if(expires_at <= current_time){
+
+            if(fseek(fp, key_length + value_length, SEEK_CUR) != 0)
+                goto cleanup;
+
+            continue;
+        }
+
+        key = malloc(key_length + 1);
+        value = malloc(value_length);
+
+        if(key == NULL || value == NULL)
+            goto cleanup;
+        
+        if(fread(key, 1, key_length, fp) != key_length)
+            goto cleanup;
+
+        key[key_length] = '\0';
+
+        if(fread(value, 1, value_length, fp) != value_length)
+            goto cleanup;
+
+        int ttl_seconds = (int)(expires_at - current_time);
+
+        if(!ht_set(ht, key, value, value_length, ttl_seconds))
+            goto cleanup;
+
+        free(key);
+        free(value);
+        key=NULL;
+        value=NULL;
+
+    }
+
+    fclose(fp);
+    return true;
+
+cleanup :
+    free(key);
+    free(value);
+    fclose(fp);
+    return false;
+}
+
+        
+
+
+            
+            
+
+
+            
 
 
 
