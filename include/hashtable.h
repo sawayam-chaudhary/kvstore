@@ -7,7 +7,7 @@
 
 typedef struct Entry{
     char *key;
-    char *value;
+    void *value;
     size_t value_len;
     time_t expires_at; //reserved for phase one
     struct Entry *next;
@@ -30,10 +30,12 @@ typedef struct HashTable{
 
 HashTable *ht_create(size_t initial_capacity);
 void ht_destroy(HashTable *ht);
-bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len, int ttl_seconds); // using const to maintain the contract that user input wouldn't be modified. It will be just used for modification inside the table
-const char* ht_get(HashTable *ht, const char *key);   // an outer parameter out_len to bypass limitation of single return and store how many values are read in it
+bool ht_set(HashTable *ht, const char *key, const void *value, size_t value_len, int ttl_seconds); // using const to maintain the contract that user input wouldn't be modified. It will be just used for modification inside the table
+const void* ht_get(HashTable *ht, const char *key, size_t *out_len);   // an outer parameter out_len to bypass limitation of single return and store how many values are read in it
 bool ht_delete(HashTable *ht, const char *key); //using false if key not found.
 bool ht_exists(HashTable *ht, const char *key);
+bool ht_load(HashTable *ht, const char *filename);
+bool ht_save(HashTable *ht, const char *filename);
 
 #endif // HASHTABLE_H
 

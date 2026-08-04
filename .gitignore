@@ -8,3 +8,5 @@ data/*.snapshot
 *.swo
 .cache/
 compile_commands.json
+test_kvstore
+test

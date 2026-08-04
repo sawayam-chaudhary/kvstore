@@ -1,4 +1,5 @@
 #include "hashtable.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -25,7 +26,7 @@ static uint64_t hash_key(const char *key){
 
     return hash;
 }
-    
+
 
 HashTable *ht_create(size_t initial_capacity){
 
@@ -64,10 +65,10 @@ void ht_destroy(HashTable *ht){
     free(ht);
 }
 
-bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len, int ttl_seconds){
+bool ht_set(HashTable *ht, const char *key, const void *value, size_t value_len, int ttl_seconds){
 
     if(ht==NULL || key == NULL || value == NULL) return false;
-    
+
     uint64_t hash = hash_key(key);
     size_t bucket_index = hash % ht->bucket_count;
 
@@ -78,10 +79,10 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len,
 
     if(strcmp(curr->key, key)==0){
 
-    char *new_value = malloc(value_len + 1);
+    char *new_value = malloc(value_len);
     if(new_value==NULL) return false;
 
-    memcpy(new_value, value, value_len + 1);
+    memcpy(new_value, value, value_len);
 
     free(curr->value);
     curr->value = new_value;
@@ -91,7 +92,7 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len,
     curr->expires_at = current_time + ttl_seconds;
     return true;
     }
-    
+
     prev=curr;
     curr=curr->next;
     }
@@ -108,13 +109,13 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len,
     }
     memcpy(new_entry->key, key, key_len + 1);
 
-    new_entry->value = malloc(value_len + 1);
+    new_entry->value = malloc(value_len);
     if(new_entry->value==NULL){
         free(new_entry->key);
         free(new_entry);
         return false;
     }
-    memcpy(new_entry->value, value, value_len+1);
+    memcpy(new_entry->value, value, value_len);
 
     new_entry->value_len = value_len;
 
@@ -130,7 +131,7 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len,
     else{
         prev->next = new_entry;
     }
-     
+
     ht->size++;
     double load_factor = (double)ht->size / ht->bucket_count;
 
@@ -140,7 +141,7 @@ bool ht_set(HashTable *ht, const char *key, const char *value, size_t value_len,
     return true;
 }
 
-const char* ht_get(HashTable *ht, const char *key){
+const void* ht_get(HashTable *ht, const char *key, size_t *out_len){
 
     if(ht==NULL || key==NULL) return NULL;
 
@@ -150,9 +151,9 @@ const char* ht_get(HashTable *ht, const char *key){
     Entry *curr = ht->buckets[bucket_index];
     Entry *prev = NULL;
     time_t current_time = time(NULL);
-    
+
     while(curr){
-        
+
 
         if(curr->expires_at <= current_time){
 
@@ -182,6 +183,7 @@ const char* ht_get(HashTable *ht, const char *key){
 
         if(strcmp(curr->key, key)==0){
 
+            if(out_len != NULL) *out_len = curr->value_len;
             return curr->value;
 
         }
@@ -190,13 +192,13 @@ const char* ht_get(HashTable *ht, const char *key){
         curr=curr->next;
 
      }
-    
-    return NULL; 
+
+    return NULL;
 }
 
 bool ht_exists(HashTable *ht, const char *key){
 
-    const char* answer = ht_get(ht, key);
+    const void* answer = ht_get(ht, key, NULL);
     return answer != NULL;
 
 }
@@ -231,7 +233,7 @@ bool ht_delete(HashTable *ht, const char *key){
         prev = curr;
         curr=curr->next;
     }
-    
+
     return false;
 }
 
@@ -273,7 +275,7 @@ size_t ht_cleanup_expired(HashTable *ht){
             time_t current_time = time(NULL);
 
             for(size_t i=0; i < ht->bucket_count; i++){
-                
+
                 Entry *curr = ht->buckets[i];
                 Entry *prev = NULL;
 
@@ -283,7 +285,7 @@ size_t ht_cleanup_expired(HashTable *ht){
                     if(curr->expires_at <= current_time){
 
                     if(prev==NULL){
-                         
+
                         ht->buckets[i] = curr->next;
                         free(curr->value);
                         free(curr->key);
@@ -308,7 +310,7 @@ size_t ht_cleanup_expired(HashTable *ht){
 
                     prev = curr;
                     curr = curr->next;
-                } 
+                }
             }
 
             return removed;
@@ -327,7 +329,7 @@ bool ht_save(HashTable *ht, const char *filename){
     if(fp == NULL) return false;
 
     static const char magic[] = KVDB_MAGIC;
-    if(fwrite(magic, 1, sizeof(magic)-1, fp) != sizeof(magic)-1) 
+    if(fwrite(magic, 1, sizeof(magic)-1, fp) != sizeof(magic)-1)
         goto cleanup;
 
     uint32_t version = KVDB_VERSION;
@@ -367,7 +369,7 @@ bool ht_save(HashTable *ht, const char *filename){
             curr=curr->next;
         }
     }
-    
+
     if(fflush(fp) != 0) goto cleanup;
 
     if(fsync(fileno(fp)) != 0) goto cleanup;
@@ -391,6 +393,9 @@ bool ht_load(HashTable *ht, const char* filename){
     FILE *fp = fopen(filename , "rb");
 
     if(fp==NULL) return false;
+
+    char *key = NULL;
+    char *value = NULL;
 
     char magic[sizeof(KVDB_MAGIC)];
 
@@ -419,8 +424,6 @@ bool ht_load(HashTable *ht, const char* filename){
     }
 
     time_t current_time = time(NULL);
-    char* key = NULL;
-    char* value = NULL;
 
     for(uint64_t i=0; i < entry_count; i++){
 
@@ -436,7 +439,7 @@ bool ht_load(HashTable *ht, const char* filename){
              goto cleanup;
 
         }
-    
+
         if(fread(&expires_at, sizeof(expires_at), 1, fp) != 1){
             goto cleanup;
         }
@@ -454,7 +457,7 @@ bool ht_load(HashTable *ht, const char* filename){
 
         if(key == NULL || value == NULL)
             goto cleanup;
-        
+
         if(fread(key, 1, key_length, fp) != key_length)
             goto cleanup;
 
@@ -484,11 +487,7 @@ cleanup :
     fclose(fp);
     return false;
 }
-
         
-
-
-            
             
 
 
